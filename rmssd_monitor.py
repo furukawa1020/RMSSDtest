@@ -168,27 +168,31 @@ class PolarH10Monitor:
         # BLE接続
         print(f"\n接続中: {self.device_address}")
         
-        async with BleakClient(self.device_address) as client:
-            print(f"✓ 接続成功!")
-            print("\n" + "=" * 60)
-            print("心拍データ取得開始")
-            print("=" * 60)
-            print(f"ベースラインRMSSD計算中... (約{self.calculator.baseline_count}サンプル)")
-            print("-" * 60)
-            
-            # 心拍データ通知を開始
-            await client.start_notify(
-                HEART_RATE_MEASUREMENT_UUID,
-                self.parse_heart_rate_data
-            )
-            
-            # 実行を継続（Ctrl+Cで停止）
-            try:
-                while True:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
-                print("\n\nモニタリング停止")
-                await client.stop_notify(HEART_RATE_MEASUREMENT_UUID)
+        try:
+            async with BleakClient(self.device_address) as client:
+                print(f"✓ 接続成功!")
+                print("\n" + "=" * 60)
+                print("心拍データ取得開始")
+                print("=" * 60)
+                print(f"ベースラインRMSSD計算中... (約{self.calculator.baseline_count}サンプル)")
+                print("-" * 60)
+                
+                # 心拍データ通知を開始
+                await client.start_notify(
+                    HEART_RATE_MEASUREMENT_UUID,
+                    self.parse_heart_rate_data
+                )
+                
+                # 実行を継続（Ctrl+Cで停止）
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                except KeyboardInterrupt:
+                    print("\n\nモニタリング停止")
+                    await client.stop_notify(HEART_RATE_MEASUREMENT_UUID)
+        except Exception as e:
+            print(f"\n❌ エラーが発生しました: {e}")
+            print("再試行するにはプログラムを再実行してください。")
 
 
 async def main():
