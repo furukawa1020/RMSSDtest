@@ -3,6 +3,7 @@
 
 // ----- 設定 -----
 // ポンプ制御ピン (TC1508A) - ATOM S3 Bottom Pins
+// ATOM S3の仕様に合わせてGPIO番号を明示
 const int PIN_IN1 = 5; // G5
 const int PIN_IN2 = 6; // G6
 
@@ -260,22 +261,38 @@ void setup() {
     pinMode(PIN_IN1, OUTPUT);
     pinMode(PIN_IN2, OUTPUT);
     
-    // --- 起動テスト ---
+    // --- 起動テスト (長めに実行) ---
     M5.Display.fillScreen(ORANGE);
     M5.Display.setCursor(0, 0);
-    M5.Display.println("TEST");
-    
+    M5.Display.println("TEST START");
+    delay(1000);
+
     // INFLATE (G5=H, G6=L)
-    M5.Display.println("INF");
+    M5.Display.fillScreen(RED);
+    M5.Display.setCursor(0, 0);
+    M5.Display.println("INFLATE");
+    M5.Display.println("G5=HIGH");
+    M5.Display.println("G6=LOW");
+    
     digitalWrite(PIN_IN1, HIGH);
     digitalWrite(PIN_IN2, LOW);
-    delay(1000);
+    delay(3000); // 3秒間回す
     
+    // OFF
+    digitalWrite(PIN_IN1, LOW);
+    digitalWrite(PIN_IN2, LOW);
+    delay(1000);
+
     // DEFLATE (G5=L, G6=H)
-    M5.Display.println("DEF");
+    M5.Display.fillScreen(BLUE);
+    M5.Display.setCursor(0, 0);
+    M5.Display.println("DEFLATE");
+    M5.Display.println("G5=LOW");
+    M5.Display.println("G6=HIGH");
+
     digitalWrite(PIN_IN1, LOW);
     digitalWrite(PIN_IN2, HIGH);
-    delay(1000);
+    delay(3000); // 3秒間回す
     
     pumpStop();
     M5.Display.println("DONE");
