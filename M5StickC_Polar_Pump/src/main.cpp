@@ -1,10 +1,10 @@
-#include <M5StickCPlus.h>
+#include <M5Unified.h>
 #include <NimBLEDevice.h>
 
 // ----- 設定 -----
-// ポンプ制御ピン (TC1508A)
-const int PIN_IN1 = 26; // G26
-const int PIN_IN2 = 25; // G25
+// ポンプ制御ピン (TC1508A) - ATOM S3 Bottom Pins
+const int PIN_IN1 = 5; // G5
+const int PIN_IN2 = 6; // G6
 
 // タイマー設定
 const unsigned long BLOW_UP_TIME_MS = 180000; // 最初の3分間 (180秒) : 膨張 & ベースライン計測
@@ -40,41 +40,40 @@ enum PumpState {
 };
 PumpState currentPumpState = STATE_STOP;
 
+void updateDisplay(const char* status, uint16_t color) {
+    M5.Display.fillScreen(color);
+    M5.Display.setCursor(0, 0);
+    M5.Display.setTextColor(WHITE);
+    M5.Display.println(status);
+}
+
 void pumpStop() {
-    if (currentPumpState == STATE_STOP) return; // 既に停止なら何もしない
+    if (currentPumpState == STATE_STOP) return;
     currentPumpState = STATE_STOP;
 
     digitalWrite(PIN_IN1, LOW);
     digitalWrite(PIN_IN2, LOW);
-    M5.Lcd.fillRect(0, 140, 135, 20, BLACK);
-    M5.Lcd.setCursor(0, 140);
-    M5.Lcd.print("Pump: STOP");
+    updateDisplay("STOP", BLACK);
 }
 
 void pumpInflate() {
-    if (currentPumpState == STATE_INFLATE) return; // 既にINFLATEなら何もしない
+    if (currentPumpState == STATE_INFLATE) return;
     currentPumpState = STATE_INFLATE;
 
     // TC1508A: IN1=H, IN2=L -> Forward
     digitalWrite(PIN_IN1, HIGH);
     digitalWrite(PIN_IN2, LOW);
-    M5.Lcd.fillRect(0, 140, 135, 20, RED);
-    M5.Lcd.setTextColor(WHITE);
-    M5.Lcd.setCursor(0, 140);
-    M5.Lcd.print("Pump: INFLATE");
+    updateDisplay("INF", RED);
 }
 
 void pumpDeflate() {
-    if (currentPumpState == STATE_DEFLATE) return; // 既にDEFLATEなら何もしない
+    if (currentPumpState == STATE_DEFLATE) return;
     currentPumpState = STATE_DEFLATE;
 
     // TC1508A: IN1=L, IN2=H -> Reverse
     digitalWrite(PIN_IN1, LOW);
     digitalWrite(PIN_IN2, HIGH);
-    M5.Lcd.fillRect(0, 140, 135, 20, BLUE);
-    M5.Lcd.setTextColor(WHITE);
-    M5.Lcd.setCursor(0, 140);
-    M5.Lcd.print("Pump: DEFLATE");
+    updateDisplay("DEF", BLUE);
 }
 
 // 非同期ポンプ制御のための変数
@@ -164,13 +163,14 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     baselineSamples.push_back(currentRmssd);
                 }
                 
-                // 画面更新
-                M5.Lcd.setCursor(0, 40);
-                M5.Lcd.printf("Phase: INITIAL\nTime: %lu/%lu s\nHR: %d bpm\nRMSSD: %.1f", 
-                    elapsedTime/1000, BLOW_UP_TIME_MS/1000, hrValue, currentRmssd);
+                // 画面更新 (ATOM S3は画面が小さいのでシンプルに)
+                if (!isPumping) {
+                     M5.Display.setCursor(0, 0);
+                     M5.Display.fillScreen(BLACK);
+                     M5.Display.setTextColor(WHITE);
+                     M5.Display.printf("Init:%lu\nHR:%d\nRM:%.1f", elapsedTime/1000, hrValue, currentRmssd);
+                }
                 
-                // ポンプは膨張し続ける (メインループまたはここで制御)
-                // 注: 別途メインループで管理
             } 
             // --- フェーズ2: フィードバック制御 ---
             else {
@@ -189,19 +189,14 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     float currentRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
                     
                     // 相対誤差の計算: (今回 - 前回) / 前回
-                    // これが "プラスマイナス" を決定する
                     float error = 0.0;
                     if (prevRelaxationValue != 0) {
                         error = (currentRelaxationValue - prevRelaxationValue) / prevRelaxationValue;
                     }
                     
                     // アクション決定
-                    // error > 0 : リラックス値上昇 (リラックス傾向) -> どうする？
-                    // error < 0 : リラックス値下降 (緊張傾向)     -> どうする？
-                    // ここでは例として:
-                    // positive (上昇) -> 膨張 (Inflate) ? 
-                    // negative (下降) -> 収縮 (Deflate) ?
-                    // ※ユーザー指示: "誤差の前後でのプラスマイナスで膨張収縮を決めて"
+                    // error > 0 : リラックス値上昇 (リラックス傾向) -> 膨張 (Inflate)
+                    // error < 0 : リラックス値下降 (緊張傾向)     -> 収縮 (Deflate)
                     
                     bool actionInflate = (error > 0); 
                     float durationSeconds = abs(error) * PUMP_MULTIPLIER;
@@ -212,11 +207,12 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     }
 
                     // 画面更新
-                    M5.Lcd.fillScreen(BLACK);
-                    M5.Lcd.setCursor(0, 0);
-                    M5.Lcd.println("Polar H10 Monitor");
-                    M5.Lcd.printf("Phase: FEEDBACK\nHR: %d\nRV: %.1f%%\nBase: %.1f\n", hrValue, currentRelaxationValue, baselineRmssd);
-                    M5.Lcd.printf("Err: %.3f\nAct: %s", error, actionInflate ? "INF" : "DEF");
+                    if (!isPumping) {
+                        M5.Display.fillScreen(BLACK);
+                        M5.Display.setCursor(0, 0);
+                        M5.Display.setTextColor(WHITE);
+                        M5.Display.printf("HR:%d\nRV:%.0f%%\nErr:%.2f", hrValue, currentRelaxationValue, error);
+                    }
 
                     // 値の更新
                     prevRelaxationValue = currentRelaxationValue;
@@ -230,12 +226,14 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
 class MyClientCallback : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pclient) {
         connected = true;
-        M5.Lcd.println("Connected!");
+        M5.Display.fillScreen(GREEN);
+        M5.Display.println("Conn!");
         startTime = millis(); // 接続した時点をスタートとする
     };
     void onDisconnect(NimBLEClient* pclient) {
         connected = false;
-        M5.Lcd.println("Disconnected");
+        M5.Display.fillScreen(RED);
+        M5.Display.println("Discon");
     }
 };
 
@@ -243,7 +241,7 @@ class MyClientCallback : public NimBLEClientCallbacks {
 class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
         if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(serviceUUID)) {
-            M5.Lcd.println("Found Polar H10");
+            M5.Display.println("Found!");
             NimBLEDevice::getScan()->stop();
             myDevice = advertisedDevice;
             doConnect = true;
@@ -253,37 +251,41 @@ class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
 };
 
 void setup() {
-    M5.begin();
-    M5.Lcd.setRotation(3);
-    M5.Lcd.setTextSize(2);
+    auto cfg = M5.config();
+    M5.begin(cfg);
+    M5.Display.setRotation(0); // ATOM S3 Default
+    M5.Display.setTextSize(1.5);
     
     // GPIO設定
     pinMode(PIN_IN1, OUTPUT);
     pinMode(PIN_IN2, OUTPUT);
     
     // --- 起動テスト ---
-    M5.Lcd.fillScreen(ORANGE);
-    M5.Lcd.setCursor(0, 20);
-    M5.Lcd.println("PUMP TEST...");
-    M5.Lcd.println("INFLATE (1s)");
-    pumpInflate();
+    M5.Display.fillScreen(ORANGE);
+    M5.Display.setCursor(0, 0);
+    M5.Display.println("TEST");
+    
+    // INFLATE (G5=H, G6=L)
+    M5.Display.println("INF");
+    digitalWrite(PIN_IN1, HIGH);
+    digitalWrite(PIN_IN2, LOW);
     delay(1000);
     
-    M5.Lcd.println("DEFLATE (1s)");
-    pumpDeflate();
+    // DEFLATE (G5=L, G6=H)
+    M5.Display.println("DEF");
+    digitalWrite(PIN_IN1, LOW);
+    digitalWrite(PIN_IN2, HIGH);
     delay(1000);
     
     pumpStop();
-    M5.Lcd.println("TEST DONE");
+    M5.Display.println("DONE");
     delay(1000);
-    M5.Lcd.fillScreen(BLACK);
+    M5.Display.fillScreen(BLACK);
     // ----------------
 
     Serial.begin(115200);
-    M5.Lcd.setCursor(0, 0);
-    M5.Lcd.println("Starting BLE...");
-    M5.Lcd.println("Scanning for");
-    M5.Lcd.println("Polar H10...");
+    M5.Display.setCursor(0, 0);
+    M5.Display.println("Scan...");
 
     NimBLEDevice::init("");
     NimBLEScan* pScan = NimBLEDevice::getScan();
@@ -295,6 +297,10 @@ void setup() {
 }
 
 void loop() {
+    M5.update();
+
+    // ボタンA（画面自体）を押すとリセット動作などを入れても良いが今は省略
+
     // 接続処理
     if (doConnect) {
         if (pClient == nullptr) {
@@ -307,7 +313,7 @@ void loop() {
             if (pRemoteService != nullptr) {
                 NimBLERemoteCharacteristic* pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
                 if (pRemoteCharacteristic != nullptr) {
-                    pRemoteCharacteristic->registerForNotify(notifyCallback);
+                    pRemoteCharacteristic->subscribe(true, notifyCallback); // subscribeを使う
                 }
             }
         }
@@ -319,8 +325,9 @@ void loop() {
         unsigned long elapsed = millis() - startTime;
         if (elapsed < BLOW_UP_TIME_MS) {
             // 最初の3分間はずっと空気を入れる
-            // 連続駆動しすぎないようにPWM制御などが望ましいが、指示通り「入れ続ける」
-            pumpInflate();
+            if (currentPumpState != STATE_INFLATE) {
+               pumpInflate();
+            }
         } else {
             // フェーズ2に入った瞬間、一旦止める処理はnotifyCallback内で行われる
             // ここではポンプのタイマー停止処理を呼ぶ
@@ -334,6 +341,5 @@ void loop() {
         }
     }
     
-    M5.update();
     delay(10);
 }
