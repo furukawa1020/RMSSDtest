@@ -2,10 +2,9 @@
 #include <NimBLEDevice.h>
 
 // ----- 設定 -----
-// ポンプ制御ピン (TC1508A) - ATOM S3 Bottom Pins
-// ATOM S3の仕様に合わせてGPIO番号を明示
-const int PIN_IN1 = 5; // G5
-const int PIN_IN2 = 6; // G6
+// ポンプ制御ピン (Grove Port) - M5StickC Plus
+const int PIN_IN1 = 32; // G32
+const int PIN_IN2 = 33; // G33
 
 // タイマー設定
 const unsigned long BLOW_UP_TIME_MS = 180000; // 最初の3分間 (180秒) : 膨張 & ベースライン計測
@@ -254,45 +253,43 @@ class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
 void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
-    M5.Display.setRotation(0); // ATOM S3 Default
-    M5.Display.setTextSize(1.5);
+    M5.Display.setRotation(3); // M5StickC Plus Landscape
+    M5.Display.setTextSize(2); // 文字サイズ大きめ
     
     // GPIO設定
     pinMode(PIN_IN1, OUTPUT);
     pinMode(PIN_IN2, OUTPUT);
     
-    // --- 起動テスト (長めに実行) ---
+    // --- 起動テスト ---
     M5.Display.fillScreen(ORANGE);
     M5.Display.setCursor(0, 0);
-    M5.Display.println("TEST START");
+    M5.Display.println("TEST");
     delay(1000);
 
-    // INFLATE (G5=H, G6=L)
+    // INFLATE (G32=H, G33=L)
     M5.Display.fillScreen(RED);
     M5.Display.setCursor(0, 0);
-    M5.Display.println("INFLATE");
-    M5.Display.println("G5=HIGH");
-    M5.Display.println("G6=LOW");
+    M5.Display.println("NIFLATE");
+    M5.Display.println("G32=H");
     
     digitalWrite(PIN_IN1, HIGH);
     digitalWrite(PIN_IN2, LOW);
-    delay(3000); // 3秒間回す
+    delay(1000); // 1秒だけテスト
     
     // OFF
     digitalWrite(PIN_IN1, LOW);
     digitalWrite(PIN_IN2, LOW);
-    delay(1000);
+    delay(500);
 
-    // DEFLATE (G5=L, G6=H)
+    // DEFLATE (G32=L, G33=H)
     M5.Display.fillScreen(BLUE);
     M5.Display.setCursor(0, 0);
     M5.Display.println("DEFLATE");
-    M5.Display.println("G5=LOW");
-    M5.Display.println("G6=HIGH");
+    M5.Display.println("G33=H");
 
     digitalWrite(PIN_IN1, LOW);
     digitalWrite(PIN_IN2, HIGH);
-    delay(3000); // 3秒間回す
+    delay(1000); // 1秒だけテスト
     
     pumpStop();
     M5.Display.println("DONE");
