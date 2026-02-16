@@ -9,7 +9,7 @@ const int PIN_PUMP_2 = 17;
 // �p�����[�^�ݒ�
 const unsigned long BLOW_UP_TIME_MS = 180000;
 const int RMSSD_WINDOW_SIZE = 30;
-const float PUMP_MULTIPLIER = 50.0;           // ���x�{�� ����ɋ��� (10�{ -> 50�{)
+const float PUMP_MULTIPLIER = 100.0;           // ���x�{�� ����ɋ��� (10�{ -> 50�{)
 const unsigned long MIN_PUMP_TIME_MS = 100;   
 const unsigned long MAX_PUMP_TIME_MS = 8000;  // �ő�8�b
 
@@ -174,7 +174,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     //  �������d�v 
                     // �����b�N�X (error > 0) -> INFLATE (����)
                     // �X�g���X (error < 0)   -> DEFLATE (�r�C)
-                    bool actionInflate = (error > 0); 
+                    bool actionInflate = (error < 0); 
                     
                     // �{���������Ď��Ԃ��Z�o
                     float durationSeconds = abs(error) * PUMP_MULTIPLIER;
