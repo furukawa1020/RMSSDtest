@@ -1,12 +1,14 @@
 #include <M5Unified.h>
 
-// ----- 設定 -----
-// ポンプ制御ピン (M5Stack Core Port A - Red)
-// Groveケーブル: 黄色=G21, 白色=G22 (I2CピンをGPIOとして使用)
-// 注意: M5Stack Basic/Gray/M5GO/Fire では Port A は I2C (SCL=22, SDA=21) です
-// GPIO設定をして出力モードに切り替えます
-const int PIN_YELLOW = 21; 
-const int PIN_WHITE  = 22; 
+// ----- 緊急用：全ピン駆動ポンプテスト -----
+// M5Stackの世代によってポートAのピンが違うため、全部動かします。
+// Basic/Gray/M5GO/Fire: 21, 22
+// Core2/CoreS3: 32, 33
+
+const int PIN_A1_OLD = 21; // Yellow (Old)
+const int PIN_A2_OLD = 22; // White (Old)
+const int PIN_A1_NEW = 32; // Yellow (New)
+const int PIN_A2_NEW = 33; // White (New)
 
 void setup() {
     auto cfg = M5.config();
@@ -14,28 +16,30 @@ void setup() {
     M5.Display.setRotation(1);
     M5.Display.setTextSize(3);
     
-    // GPIO設定
-    // Port AはデフォルトでI2Cプルアップされている場合がありますが
-    // OUTPUT設定で強制的にH/L駆動します
-    pinMode(PIN_YELLOW, OUTPUT);
-    
-    pinMode(PIN_WHITE, OUTPUT);
+    // 全ての可能性のあるピンを出力設定
+    pinMode(PIN_A1_OLD, OUTPUT);
+    pinMode(PIN_A2_OLD, OUTPUT);
+    pinMode(PIN_A1_NEW, OUTPUT);
+    pinMode(PIN_A2_NEW, OUTPUT);
     
     M5.Display.fillScreen(BLACK);
     M5.Display.setCursor(0, 0);
-    M5.Display.println("M5GO PORT A");\n    M5.Display.println("PUMP TEST");
+    M5.Display.println("ALL PIN TEST");
+    M5.Display.println("21,22,32,33");
     delay(2000);
 }
 
 void loop() {
-    // パターン1: 黄色(21) ON
+    // パターン1: 黄色ライン (G21 & G32) ON
     M5.Display.fillScreen(RED);
     M5.Display.setCursor(10, 50);
-    M5.Display.println("PIN 21 (YEL)");
-    M5.Display.println("ON");
+    M5.Display.println("YELLOW ON");
     
-    digitalWrite(PIN_YELLOW, HIGH);
-    digitalWrite(PIN_WHITE, LOW);
+    digitalWrite(PIN_A1_OLD, HIGH); // 21
+    digitalWrite(PIN_A1_NEW, HIGH); // 32
+    
+    digitalWrite(PIN_A2_OLD, LOW);
+    digitalWrite(PIN_A2_NEW, LOW);
     
     delay(3000); // 3秒
 
@@ -44,19 +48,23 @@ void loop() {
     M5.Display.setCursor(10, 50);
     M5.Display.println("STOP");
     
-    digitalWrite(PIN_YELLOW, LOW);
-    digitalWrite(PIN_WHITE, LOW);
+    digitalWrite(PIN_A1_OLD, LOW);
+    digitalWrite(PIN_A1_NEW, LOW);
+    digitalWrite(PIN_A2_OLD, LOW);
+    digitalWrite(PIN_A2_NEW, LOW);
     
     delay(2000);
 
-    // パターン2: 白色(22) ON
+    // パターン2: 白色ライン (G22 & G33) ON
     M5.Display.fillScreen(BLUE);
     M5.Display.setCursor(10, 50);
-    M5.Display.println("PIN 22 (WHT)");
-    M5.Display.println("ON");
+    M5.Display.println("WHITE ON");
 
-    digitalWrite(PIN_YELLOW, LOW);
-    digitalWrite(PIN_WHITE, HIGH);
+    digitalWrite(PIN_A2_OLD, HIGH); // 22
+    digitalWrite(PIN_A2_NEW, HIGH); // 33
+
+    digitalWrite(PIN_A1_OLD, LOW);
+    digitalWrite(PIN_A1_NEW, LOW);
     
     delay(3000); // 3秒
 
@@ -65,8 +73,10 @@ void loop() {
     M5.Display.setCursor(10, 50);
     M5.Display.println("STOP");
     
-    digitalWrite(PIN_YELLOW, LOW);
-    digitalWrite(PIN_WHITE, LOW);
+    digitalWrite(PIN_A1_OLD, LOW);
+    digitalWrite(PIN_A1_NEW, LOW);
+    digitalWrite(PIN_A2_OLD, LOW);
+    digitalWrite(PIN_A2_NEW, LOW);
     
     delay(2000);
 }
