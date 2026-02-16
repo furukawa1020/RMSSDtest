@@ -49,7 +49,7 @@ void pumpDeflate() {
     digitalWrite(PIN_PUMP_2, HIGH);
 }
 
-void triggerPump(bool inflate, float seconds, float currentRelaxVal) {
+void triggerPump(bool inflate, float seconds, float currentRelaxVal, int hr, float rmssd, float base) {
     if (seconds <= 0) return;
     
     unsigned long duration = (unsigned long)(seconds * 1000);
@@ -58,12 +58,20 @@ void triggerPump(bool inflate, float seconds, float currentRelaxVal) {
     
     // RED=Stress(Deflate), BLUE=Relax(Inflate)
     M5.Display.fillScreen(inflate ? BLUE : RED);
-    M5.Display.setCursor(10, 50);
-    M5.Display.setTextSize(3);
+    
+    // Header Info (Always visible)
+    M5.Display.setCursor(0, 0);
+    M5.Display.setTextSize(2);
     M5.Display.setTextColor(WHITE);
-    // ��ʕ\�����킩��₷���ύX
-    M5.Display.println(inflate ? "RELAXED!\n(INFLATE)" : "STRESSED!\n(DEFLATE)");
-    M5.Display.printf("Relax: %.0f%%\n", currentRelaxVal);
+    M5.Display.printf("HR:%d R:%.1f\n", hr, rmssd);
+    M5.Display.printf("Base:%.1f RLX:%.0f%%\n", base, currentRelaxVal);
+    
+    // Pump Status (Larger)
+    M5.Display.setCursor(10, 60);
+    M5.Display.setTextSize(3);
+
+    // Shorten text to fit? Assuming landscape.
+    M5.Display.println(inflate ? "RELAX! (UP)" : "STRESS! (DN)");
     M5.Display.printf("%.1f sec", duration / 1000.0);
 
     if (inflate) pumpInflate();
@@ -165,7 +173,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     float durationSeconds = abs(error) * PUMP_MULTIPLIER;
                     
                     if (!isPumping && durationSeconds > 0.05) { 
-                         triggerPump(actionInflate, durationSeconds, currentRelaxationValue);
+                         triggerPump(actionInflate, durationSeconds, currentRelaxationValue, hrValue, currentRmssd, baselineRmssd);
                     }
 
                     if (!isPumping) {
