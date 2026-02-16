@@ -131,14 +131,21 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     // Ensure isPumping is false so loop() doesn't auto-stop it
                     // (But we want to update display)
                     if (!isPumping) {
-                        M5.Display.fillScreen(BLACK);
+                        // Use BLUE for "Inflating" consistent with feedback phase
+                        M5.Display.fillScreen(BLUE); 
                         M5.Display.setCursor(0, 0);
                         M5.Display.setTextColor(WHITE);
                         M5.Display.setTextSize(2);
-                        M5.Display.println("INITIAL INFLATION");
-                        M5.Display.printf("(%ds remaining)\n", (BLOW_UP_TIME_MS - elapsed)/1000);
-                        M5.Display.printf("HR: %d bpm\n", hrValue);
-                        M5.Display.printf("RMSSD: %.1f\n", currentRmssd);
+                        
+                        // Header
+                        M5.Display.printf("HR:%d R:%.1f\n", hrValue, currentRmssd);
+                        M5.Display.println("----------------");
+                        
+                        M5.Display.setTextSize(3);
+                        M5.Display.println("INITIALIZING");
+                        M5.Display.println("(INFLATING)");
+                        M5.Display.setTextSize(2);
+                        M5.Display.printf("Wait: %ds\n", (BLOW_UP_TIME_MS - elapsed)/1000);
                     }
                 } 
                 else {
