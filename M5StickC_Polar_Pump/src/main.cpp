@@ -2,22 +2,22 @@
 #include <NimBLEDevice.h>
 #include <driver/gpio.h>
 
-// ----- İ’è (Port C) -----
+// ----- ï¿½İ’ï¿½ (Port C) -----
 const int PIN_PUMP_1 = 16;
 const int PIN_PUMP_2 = 17;
 
-// ƒpƒ‰ƒ[ƒ^İ’è
+// ï¿½pï¿½ï¿½ï¿½ï¿½ï¿½[ï¿½^ï¿½İ’ï¿½
 const unsigned long BLOW_UP_TIME_MS = 180000;
 const int RMSSD_WINDOW_SIZE = 30;
-const float PUMP_MULTIPLIER = 50.0;           // Š´“x”{—¦ ‚³‚ç‚É‹­‰» (10”{ -> 50”{)
+const float PUMP_MULTIPLIER = 50.0;           // ï¿½ï¿½ï¿½xï¿½{ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½É‹ï¿½ï¿½ï¿½ (10ï¿½{ -> 50ï¿½{)
 const unsigned long MIN_PUMP_TIME_MS = 100;   
-const unsigned long MAX_PUMP_TIME_MS = 8000;  // Å‘å8•b
+const unsigned long MAX_PUMP_TIME_MS = 8000;  // ï¿½Å‘ï¿½8ï¿½b
 
 // Polar UUIDs
 static BLEUUID serviceUUID("180d");
 static BLEUUID charUUID("2a37");
 
-// ƒOƒ[ƒoƒ‹•Ï”
+// ï¿½Oï¿½ï¿½ï¿½[ï¿½oï¿½ï¿½ï¿½Ïï¿½
 bool doConnect = false;
 bool connected = false;
 bool doScan = false;
@@ -49,19 +49,21 @@ void pumpDeflate() {
     digitalWrite(PIN_PUMP_2, HIGH);
 }
 
-void triggerPump(bool inflate, float seconds) {
+void triggerPump(bool inflate, float seconds, float currentRelaxVal) {
     if (seconds <= 0) return;
     
     unsigned long duration = (unsigned long)(seconds * 1000);
     if (duration < MIN_PUMP_TIME_MS) duration = MIN_PUMP_TIME_MS;
     if (duration > MAX_PUMP_TIME_MS) duration = MAX_PUMP_TIME_MS;
     
-    M5.Display.fillScreen(inflate ? RED : BLUE);
+    // RED=Stress(Deflate), BLUE=Relax(Inflate)
+    M5.Display.fillScreen(inflate ? BLUE : RED);
     M5.Display.setCursor(10, 50);
     M5.Display.setTextSize(3);
     M5.Display.setTextColor(WHITE);
-    // ‰æ–Ê•\¦‚à‚í‚©‚è‚â‚·‚­•ÏX
+    // ï¿½ï¿½Ê•\ï¿½ï¿½ï¿½ï¿½ï¿½í‚©ï¿½ï¿½â‚·ï¿½ï¿½ï¿½ÏX
     M5.Display.println(inflate ? "RELAXED!\n(INFLATE)" : "STRESSED!\n(DEFLATE)");
+    M5.Display.printf("Relax: %.0f%%\n", currentRelaxVal);
     M5.Display.printf("%.1f sec", duration / 1000.0);
 
     if (inflate) pumpInflate();
@@ -113,21 +115,28 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                 unsigned long elapsed = millis() - startTime;
                 
                 if (elapsed < BLOW_UP_TIME_MS) {
+                    // Continuous inflation during baseline (User request)
+                    pumpInflate();
+
                     baselineSamples.push_back(currentRmssd);
                     
+                    // Ensure isPumping is false so loop() doesn't auto-stop it
+                    // (But we want to update display)
                     if (!isPumping) {
                         M5.Display.fillScreen(BLACK);
                         M5.Display.setCursor(0, 0);
                         M5.Display.setTextColor(WHITE);
                         M5.Display.setTextSize(2);
-                        M5.Display.println("BASELINE MEASURING");
+                        M5.Display.println("INITIAL INFLATION");
+                        M5.Display.printf("(%ds remaining)\n", (BLOW_UP_TIME_MS - elapsed)/1000);
                         M5.Display.printf("HR: %d bpm\n", hrValue);
                         M5.Display.printf("RMSSD: %.1f\n", currentRmssd);
-                        M5.Display.printf("Time: %d / 180s", elapsed / 1000);
                     }
                 } 
                 else {
                     if (!isBaselineEstablished) {
+                        pumpStop(); // Stop the initial 3-min inflation
+
                         float sum = 0;
                         for(float v : baselineSamples) sum += v;
                         if (!baselineSamples.empty()) baselineRmssd = sum / baselineSamples.size();
@@ -147,16 +156,16 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     float currentRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
                     float error = (currentRelaxationValue - prevRelaxationValue) / prevRelaxationValue;
                     
-                    //  ‚±‚±‚ªd—v 
-                    // ƒŠƒ‰ƒbƒNƒX (error > 0) -> INFLATE (‰Áˆ³)
-                    // ƒXƒgƒŒƒX (error < 0)   -> DEFLATE (”r‹C)
+                    //  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½dï¿½v 
+                    // ï¿½ï¿½ï¿½ï¿½ï¿½bï¿½Nï¿½X (error > 0) -> INFLATE (ï¿½ï¿½ï¿½ï¿½)
+                    // ï¿½Xï¿½gï¿½ï¿½ï¿½X (error < 0)   -> DEFLATE (ï¿½rï¿½C)
                     bool actionInflate = (error > 0); 
                     
-                    // ”{—¦‚ğ‚©‚¯‚ÄŠÔ‚ğZo
+                    // ï¿½{ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Äï¿½ï¿½Ô‚ï¿½ï¿½Zï¿½o
                     float durationSeconds = abs(error) * PUMP_MULTIPLIER;
                     
                     if (!isPumping && durationSeconds > 0.05) { 
-                         triggerPump(actionInflate, durationSeconds);
+                         triggerPump(actionInflate, durationSeconds, currentRelaxationValue);
                     }
 
                     if (!isPumping) {
@@ -168,7 +177,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                         M5.Display.printf("HR: %d bpm\n", hrValue);
                         M5.Display.printf("RMSSD: %.1f\n", currentRmssd);
                         M5.Display.printf("Base: %.1f\n", baselineRmssd);
-                        M5.Display.printf("RV: %.0f%%\n", currentRelaxationValue);
+                        M5.Display.printf("Relax: %.0f%%\n", currentRelaxationValue);
                     }
                     prevRelaxationValue = currentRelaxationValue;
                 }
@@ -249,8 +258,22 @@ void setup() {
 void loop() {
     M5.update();
     
+    // Manual Button Control
+    if (M5.BtnA.isPressed()) {
+        pumpInflate();
+        pumpEndTime = millis() + 200; // Keep pumping while held
+        isPumping = true;
+    }
+    else if (M5.BtnC.isPressed()) {
+        pumpDeflate();
+        pumpEndTime = millis() + 200; // Keep pumping while held
+        isPumping = true;
+    }
+
     if (isPumping && millis() > pumpEndTime) {
         pumpStop();
+        // Clear screen or update status after manual stop? 
+        // Or just let next notify update it.
     }
 
     if (doConnect) {
