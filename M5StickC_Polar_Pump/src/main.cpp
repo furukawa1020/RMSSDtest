@@ -2,9 +2,9 @@
 #include <NimBLEDevice.h>
 #include <driver/gpio.h>
 
-// ----- 設定 (ATOMS3 G5/G6) -----
-const int PIN_PUMP_1 = 5;
-const int PIN_PUMP_2 = 6;
+// ----- 設定 (ATOMS3 Grove G1/G2) -----
+const int PIN_PUMP_1 = 1;
+const int PIN_PUMP_2 = 2;
 
 // �p�����[�^�ݒ�
 const unsigned long BLOW_UP_TIME_MS = 180000;
