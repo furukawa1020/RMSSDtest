@@ -2,9 +2,9 @@
 #include <NimBLEDevice.h>
 #include <driver/gpio.h>
 
-// ----- �ݒ� (Port C) -----
-const int PIN_PUMP_1 = 16;
-const int PIN_PUMP_2 = 17;
+// ----- 設定 (ATOMS3 G5/G6) -----
+const int PIN_PUMP_1 = 5;
+const int PIN_PUMP_2 = 6;
 
 // �p�����[�^�ݒ�
 const unsigned long BLOW_UP_TIME_MS = 180000;
