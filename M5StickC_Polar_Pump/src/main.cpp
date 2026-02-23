@@ -32,6 +32,7 @@ unsigned long startTime = 0;
 bool isBaselineEstablished = false;
 bool isPumping = false;
 unsigned long pumpEndTime = 0;
+bool buttonWasLongPress = false;
 
 void pumpStop() {
     digitalWrite(PIN_PUMP_1, LOW);
@@ -273,22 +274,10 @@ void setup() {
 void loop() {
     M5.update();
     
-    // Manual Button Control (ATOMS3: single touch button)
-    // Short press: Inflate, Long press (>500ms): Deflate
-    if (M5.BtnA.wasPressed()) {
-        pumpInflate();
-        pumpEndTime = millis() + 1000; // Inflate for 1 second
-        isPumping = true;
-        
-        // Show feedback
-        M5.Display.fillScreen(BLUE);
-        M5.Display.setCursor(10, 40);
-        M5.Display.setTextSize(3);
-        M5.Display.setTextColor(WHITE);
-        M5.Display.println("MANUAL");
-        M5.Display.println("INFLATE");
-    }
-    else if (M5.BtnA.pressedFor(500)) {
+    // Manual Button Control (ATOMS3: touch screen button)
+    // Long press (>500ms): Deflate, Released after short press: Inflate
+    if (M5.BtnA.pressedFor(500) && !buttonWasLongPress) {
+        buttonWasLongPress = true;
         pumpDeflate();
         pumpEndTime = millis() + 1000; // Deflate for 1 second
         isPumping = true;
@@ -300,6 +289,23 @@ void loop() {
         M5.Display.setTextColor(WHITE);
         M5.Display.println("MANUAL");
         M5.Display.println("DEFLATE");
+    }
+    else if (M5.BtnA.wasReleased()) {
+        if (!buttonWasLongPress) {
+            // Short press - inflate
+            pumpInflate();
+            pumpEndTime = millis() + 1000; // Inflate for 1 second
+            isPumping = true;
+            
+            // Show feedback
+            M5.Display.fillScreen(BLUE);
+            M5.Display.setCursor(10, 40);
+            M5.Display.setTextSize(3);
+            M5.Display.setTextColor(WHITE);
+            M5.Display.println("MANUAL");
+            M5.Display.println("INFLATE");
+        }
+        buttonWasLongPress = false; // Reset flag
     }
 
     if (isPumping && millis() > pumpEndTime) {
