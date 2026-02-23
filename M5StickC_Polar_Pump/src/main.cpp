@@ -2,6 +2,11 @@
 #include <NimBLEDevice.h>
 #include <driver/gpio.h>
 
+// ----- センサー選択 -----
+// どちらか1つをコメントアウトしてください
+#define USE_POLAR_H10     // Polar H10を使用
+// #define USE_COOSPO     // CooSpoを使用
+
 // ----- 設定 (ATOMS3 Grove G1/G2) -----
 const int PIN_PUMP_1 = 1;
 const int PIN_PUMP_2 = 2;
@@ -222,11 +227,26 @@ class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
         M5.Display.print("."); 
         if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(serviceUUID)) {
-            M5.Display.println("\nFound Polar!");
-            NimBLEDevice::getScan()->stop();
-            myDevice = advertisedDevice;
-            doConnect = true;
-            doScan = true;
+#ifdef USE_POLAR_H10
+            // Polar H10を探す
+            if (advertisedDevice->getName().find("Polar") != std::string::npos) {
+                M5.Display.println("\nFound Polar H10!");
+#elif defined(USE_COOSPO)
+            // CooSpoを探す
+            if (advertisedDevice->getName().find("CooSpo") != std::string::npos || 
+                advertisedDevice->getName().find("HR") != std::string::npos) {
+                M5.Display.println("\nFound CooSpo!");
+#else
+            // すべてのHRセンサーに接続
+            {
+                M5.Display.println("\nFound HR Sensor!");
+#endif
+                M5.Display.printf("Device: %s\n", advertisedDevice->getName().c_str());
+                NimBLEDevice::getScan()->stop();
+                myDevice = advertisedDevice;
+                doConnect = true;
+                doScan = true;
+            }
         }
     }
 };
@@ -262,7 +282,13 @@ void setup() {
     
     M5.Display.fillScreen(BLACK);
     M5.Display.setCursor(0, 0);
+#ifdef USE_POLAR_H10
     M5.Display.println("Scanning Polar H10...");
+#elif defined(USE_COOSPO)
+    M5.Display.println("Scanning CooSpo...");
+#else
+    M5.Display.println("Scanning HR Sensor...");
+#endif
     
     NimBLEDevice::init("");
     NimBLEScan* pScan = NimBLEDevice::getScan();
