@@ -9,9 +9,9 @@ const int PIN_PUMP_2 = 2;
 // �p�����[�^�ݒ�
 const unsigned long BLOW_UP_TIME_MS = 180000;
 const int RMSSD_WINDOW_SIZE = 30;
-const float PUMP_MULTIPLIER = 100.0;           // ���x�{�� ����ɋ��� (10�{ -> 50�{)
+const float PUMP_MULTIPLIER = 100.0;           // 
 const unsigned long MIN_PUMP_TIME_MS = 100;   
-const unsigned long MAX_PUMP_TIME_MS = 8000;  // �ő�8�b
+const unsigned long MAX_PUMP_TIME_MS = 8000;  // ＾
 
 // Polar UUIDs
 static BLEUUID serviceUUID("180d");
@@ -273,15 +273,16 @@ void setup() {
 void loop() {
     M5.update();
     
-    // Manual Button Control
-    if (M5.BtnA.isPressed()) {
+    // Manual Button Control (ATOMS3: single touch button)
+    // Short press: Inflate, Long press (>500ms): Deflate
+    if (M5.BtnA.wasPressed()) {
         pumpInflate();
-        pumpEndTime = millis() + 200; // Keep pumping while held
+        pumpEndTime = millis() + 1000; // Inflate for 1 second
         isPumping = true;
     }
-    else if (M5.BtnC.isPressed()) {
+    else if (M5.BtnA.pressedFor(500)) {
         pumpDeflate();
-        pumpEndTime = millis() + 200; // Keep pumping while held
+        pumpEndTime = millis() + 1000; // Deflate for 1 second
         isPumping = true;
     }
 
