@@ -279,11 +279,27 @@ void loop() {
         pumpInflate();
         pumpEndTime = millis() + 1000; // Inflate for 1 second
         isPumping = true;
+        
+        // Show feedback
+        M5.Display.fillScreen(BLUE);
+        M5.Display.setCursor(10, 40);
+        M5.Display.setTextSize(3);
+        M5.Display.setTextColor(WHITE);
+        M5.Display.println("MANUAL");
+        M5.Display.println("INFLATE");
     }
     else if (M5.BtnA.pressedFor(500)) {
         pumpDeflate();
         pumpEndTime = millis() + 1000; // Deflate for 1 second
         isPumping = true;
+        
+        // Show feedback
+        M5.Display.fillScreen(RED);
+        M5.Display.setCursor(10, 40);
+        M5.Display.setTextSize(3);
+        M5.Display.setTextColor(WHITE);
+        M5.Display.println("MANUAL");
+        M5.Display.println("DEFLATE");
     }
 
     if (isPumping && millis() > pumpEndTime) {
