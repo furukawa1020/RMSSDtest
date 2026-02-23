@@ -275,8 +275,8 @@ void loop() {
     M5.update();
     
     // Manual Button Control (ATOMS3: touch screen button)
-    // Long press (>700ms): Deflate, Short press: Inflate
-    if (M5.BtnA.pressedFor(700) && !buttonWasLongPress) {
+    // Long press (>5s): Deflate, Short press: Inflate
+    if (M5.BtnA.pressedFor(5000) && !buttonWasLongPress) {
         buttonWasLongPress = true;
         pumpDeflate();
         pumpEndTime = millis() + 1000;
