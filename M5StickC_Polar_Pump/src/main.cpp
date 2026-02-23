@@ -274,20 +274,8 @@ void setup() {
 void loop() {
     M5.update();
     
-    // Debug: Show button state
-    static int tapCount = 0;
-    
     // Manual Button Control (ATOMS3: touch screen button)
-    if (M5.BtnA.wasPressed()) {
-        tapCount++;
-        M5.Display.fillScreen(GREEN);
-        M5.Display.setCursor(10, 40);
-        M5.Display.setTextSize(3);
-        M5.Display.setTextColor(WHITE);
-        M5.Display.printf("TAP: %d\n", tapCount);
-        delay(500);
-    }
-    
+    // Long press (>700ms): Deflate, Short press: Inflate
     if (M5.BtnA.pressedFor(700) && !buttonWasLongPress) {
         buttonWasLongPress = true;
         pumpDeflate();
@@ -301,20 +289,21 @@ void loop() {
         M5.Display.println("MANUAL");
         M5.Display.println("DEFLATE");
     }
-    else if (M5.BtnA.wasReleased() && !buttonWasLongPress) {
-        pumpInflate();
-        pumpEndTime = millis() + 1000;
-        isPumping = true;
-        
-        M5.Display.fillScreen(BLUE);
-        M5.Display.setCursor(10, 40);
-        M5.Display.setTextSize(3);
-        M5.Display.setTextColor(WHITE);
-        M5.Display.println("MANUAL");
-        M5.Display.println("INFLATE");
-    }
     
     if (M5.BtnA.wasReleased()) {
+        if (!buttonWasLongPress) {
+            // Short press - inflate
+            pumpInflate();
+            pumpEndTime = millis() + 1000;
+            isPumping = true;
+            
+            M5.Display.fillScreen(BLUE);
+            M5.Display.setCursor(10, 40);
+            M5.Display.setTextSize(3);
+            M5.Display.setTextColor(WHITE);
+            M5.Display.println("MANUAL");
+            M5.Display.println("INFLATE");
+        }
         buttonWasLongPress = false;
     }
 
