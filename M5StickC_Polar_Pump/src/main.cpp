@@ -279,7 +279,7 @@ void loop() {
     if (M5.BtnA.pressedFor(5000) && !buttonWasLongPress) {
         buttonWasLongPress = true;
         pumpDeflate();
-        pumpEndTime = millis() + 1000;
+        pumpEndTime = millis() + 3000; // 3 seconds
         isPumping = true;
         
         M5.Display.fillScreen(RED);
@@ -288,13 +288,14 @@ void loop() {
         M5.Display.setTextColor(WHITE);
         M5.Display.println("MANUAL");
         M5.Display.println("DEFLATE");
+        M5.Display.println("3s");
     }
     
     if (M5.BtnA.wasReleased()) {
         if (!buttonWasLongPress) {
             // Short press - inflate
             pumpInflate();
-            pumpEndTime = millis() + 1000;
+            pumpEndTime = millis() + 3000; // 3 seconds
             isPumping = true;
             
             M5.Display.fillScreen(BLUE);
@@ -303,6 +304,7 @@ void loop() {
             M5.Display.setTextColor(WHITE);
             M5.Display.println("MANUAL");
             M5.Display.println("INFLATE");
+            M5.Display.println("3s");
         }
         buttonWasLongPress = false;
     }
