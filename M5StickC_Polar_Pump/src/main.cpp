@@ -39,6 +39,32 @@ bool isPumping = false;
 unsigned long pumpEndTime = 0;
 bool buttonWasLongPress = false;
 
+// --- Display state globals ---
+int g_hr = 0;
+float g_rmssd = 0.0;
+float g_relax = 0.0;
+String g_pumpStatus = "IDLE";
+bool g_isManual = false;
+String g_phase = "SCANNING";
+
+void drawDisplay() {
+    M5.Display.fillScreen(BLACK);
+    M5.Display.setCursor(0, 0);
+    M5.Display.setTextSize(2);
+    M5.Display.setTextColor(WHITE);
+    M5.Display.printf("HR:%d bpm\n", g_hr);
+    M5.Display.printf("RR:%.1f ms\n", g_rmssd);
+    M5.Display.printf("Bs:%.1f\n", baselineRmssd);
+    M5.Display.printf("Rx:%.0f%%\n", g_relax);
+    if (g_pumpStatus == "INFLATE") M5.Display.setTextColor(CYAN);
+    else if (g_pumpStatus == "DEFLATE") M5.Display.setTextColor(RED);
+    else M5.Display.setTextColor(GREEN);
+    if (g_isManual) M5.Display.print("[M]");
+    M5.Display.println(g_pumpStatus);
+    M5.Display.setTextColor(YELLOW);
+    M5.Display.println(g_phase);
+}
+
 void pumpStop() {
     digitalWrite(PIN_PUMP_1, LOW);
     digitalWrite(PIN_PUMP_2, LOW);
@@ -55,30 +81,16 @@ void pumpDeflate() {
     digitalWrite(PIN_PUMP_2, HIGH);
 }
 
-void triggerPump(bool inflate, float seconds, float currentRelaxVal, int hr, float rmssd, float base) {
+void triggerPump(bool inflate, float seconds) {
     if (seconds <= 0) return;
     
     unsigned long duration = (unsigned long)(seconds * 1000);
     if (duration < MIN_PUMP_TIME_MS) duration = MIN_PUMP_TIME_MS;
     if (duration > MAX_PUMP_TIME_MS) duration = MAX_PUMP_TIME_MS;
     
-    // RED=Stress(Deflate), BLUE=Relax(Inflate)
-    M5.Display.fillScreen(inflate ? BLUE : RED);
-    
-    // Header Info (Always visible)
-    M5.Display.setCursor(0, 0);
-    M5.Display.setTextSize(2);
-    M5.Display.setTextColor(WHITE);
-    M5.Display.printf("HR:%d R:%.1f\n", hr, rmssd);
-    M5.Display.printf("Base:%.1f RLX:%.0f%%\n", base, currentRelaxVal);
-    
-    // Pump Status (Larger)
-    M5.Display.setCursor(10, 60);
-    M5.Display.setTextSize(3);
-
-    // Shorten text to fit? Assuming landscape.
-    M5.Display.println(inflate ? "RELAX! (UP)" : "STRESS! (DN)");
-    M5.Display.printf("%.1f sec", duration / 1000.0);
+    g_pumpStatus = inflate ? "INFLATE" : "DEFLATE";
+    g_isManual = false;
+    drawDisplay();
 
     if (inflate) pumpInflate();
     else pumpDeflate();
@@ -112,47 +124,47 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         offset = 2;
     }
 
-    if (flags & 0x10) {
-        for (int i = offset; i < length; i += 2) {
-            if (i + 1 >= length) break;
-            
-            uint16_t rawRR = pData[i] | (pData[i+1] << 8);
-            float rrMs = (rawRR / 1024.0) * 1000.0;
-            
-            rrIntervals.push_back(rrMs);
-            if (rrIntervals.size() > RMSSD_WINDOW_SIZE) {
-                rrIntervals.erase(rrIntervals.begin());
-            }
+    // Always update HR display (even without RR data)
+    g_hr = hrValue;
 
-            if (rrIntervals.size() >= 2) {
+    // Force-try to parse remaining bytes as RR intervals regardless of flags
+    // (Some cheap sensors send RR without setting the flag bit correctly)
+    bool gotRR = false;
+    for (int i = offset; i + 1 < (int)length; i += 2) {
+        uint16_t rawRR = pData[i] | (pData[i+1] << 8);
+        float rrMs = (rawRR / 1024.0) * 1000.0;
+        // Accept only physiologically plausible RR (200ms=300bpm ~ 2500ms=24bpm)
+        if (rrMs < 200 || rrMs > 2500) continue;
+        gotRR = true;
+        rrIntervals.push_back(rrMs);
+        if (rrIntervals.size() > RMSSD_WINDOW_SIZE) {
+            rrIntervals.erase(rrIntervals.begin());
+        }
+    }
+
+    if (!gotRR) {
+        char buf[40];
+        snprintf(buf, sizeof(buf), "NO RR f=0x%02X l=%d", flags, (int)length);
+        g_phase = String(buf);
+        g_rmssd = 0;
+        drawDisplay();
+        return;
+    }
+
+    if (rrIntervals.size() >= 2) {
                 float currentRmssd = calculateRmssd();
                 unsigned long elapsed = millis() - startTime;
                 
                 if (elapsed < BLOW_UP_TIME_MS) {
-                    // Continuous inflation during baseline (User request)
+                    // Continuous inflation during baseline
                     pumpInflate();
-
                     baselineSamples.push_back(currentRmssd);
-                    
-                    // Ensure isPumping is false so loop() doesn't auto-stop it
-                    // (But we want to update display)
-                    if (!isPumping) {
-                        // Use BLUE for "Inflating" consistent with feedback phase
-                        M5.Display.fillScreen(BLUE); 
-                        M5.Display.setCursor(0, 0);
-                        M5.Display.setTextColor(WHITE);
-                        M5.Display.setTextSize(2);
-                        
-                        // Header
-                        M5.Display.printf("HR:%d R:%.1f\n", hrValue, currentRmssd);
-                        M5.Display.println("----------------");
-                        
-                        M5.Display.setTextSize(3);
-                        M5.Display.println("INITIALIZING");
-                        M5.Display.println("(INFLATING)");
-                        M5.Display.setTextSize(2);
-                        M5.Display.printf("Wait: %ds\n", (BLOW_UP_TIME_MS - elapsed)/1000);
-                    }
+                    g_hr = hrValue;
+                    g_rmssd = currentRmssd;
+                    g_pumpStatus = "INFLATE";
+                    g_isManual = false;
+                    g_phase = "BL:" + String((BLOW_UP_TIME_MS - elapsed) / 1000) + "s";
+                    drawDisplay();
                 } 
                 else {
                     if (!isBaselineEstablished) {
@@ -165,12 +177,12 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                         isBaselineEstablished = true;
                         
                         prevRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
-                        
-                        M5.Display.fillScreen(GREEN);
-                        M5.Display.setCursor(0,0);
-                        M5.Display.setTextSize(3);
-                        M5.Display.println("START CONTROL!");
-                        delay(2000);
+
+                        g_phase = "FEEDBACK";
+                        g_pumpStatus = "IDLE";
+                        g_isManual = false;
+                        drawDisplay();
+                        delay(300);
                         return;
                     }
 
@@ -185,41 +197,42 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     // �{���������Ď��Ԃ��Z�o
                     float durationSeconds = abs(error) * PUMP_MULTIPLIER;
                     
-                    if (!isPumping && durationSeconds > 0.05) { 
-                         triggerPump(actionInflate, durationSeconds, currentRelaxationValue, hrValue, currentRmssd, baselineRmssd);
-                    }
+                    // Always update display globals with fresh sensor data
+                    g_hr = hrValue;
+                    g_rmssd = currentRmssd;
+                    g_relax = currentRelaxationValue;
+                    g_phase = "FEEDBACK";
 
-                    if (!isPumping) {
-                        M5.Display.fillScreen(BLACK);
-                        M5.Display.setCursor(0, 0);
-                        M5.Display.setTextColor(WHITE);
-                        M5.Display.setTextSize(2);
-                        M5.Display.println("FEEDBACK ACTIVE");
-                        M5.Display.printf("HR: %d bpm\n", hrValue);
-                        M5.Display.printf("RMSSD: %.1f\n", currentRmssd);
-                        M5.Display.printf("Base: %.1f\n", baselineRmssd);
-                        M5.Display.printf("Relax: %.0f%%\n", currentRelaxationValue);
+                    if (!isPumping && durationSeconds > 0.05) {
+                        triggerPump(actionInflate, durationSeconds);
+                    } else {
+                        if (!isPumping) {
+                            g_pumpStatus = "IDLE";
+                            g_isManual = false;
+                        }
+                        drawDisplay();
                     }
                     prevRelaxationValue = currentRelaxationValue;
                 }
             }
-        }
     }
 }
 
 class MyClientCallback : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pclient) {
         connected = true;
-        M5.Display.fillScreen(GREEN);
-        M5.Display.setCursor(0,0);
-        M5.Display.println("Connected!");
-        delay(1000);
+        g_phase = "CONNECTED";
+        g_pumpStatus = "INFLATE";
+        g_isManual = false;
+        drawDisplay();
+        delay(300);
         startTime = millis(); 
     };
     void onDisconnect(NimBLEClient* pclient) {
         connected = false;
-        M5.Display.fillScreen(RED);
-        M5.Display.println("Disconnected...");
+        g_phase = "DISCONNECTED";
+        g_pumpStatus = "IDLE";
+        drawDisplay();
     }
 };
 
@@ -232,10 +245,9 @@ class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
             if (advertisedDevice->getName().find("Polar") != std::string::npos) {
                 M5.Display.println("\nFound Polar H10!");
 #elif defined(USE_COOSPO)
-            // CooSpoを探す
-            if (advertisedDevice->getName().find("CooSpo") != std::string::npos || 
-                advertisedDevice->getName().find("HR") != std::string::npos) {
-                M5.Display.println("\nFound CooSpo!");
+            // CooSpo/HW706: デバイス名に関係なくHRサービスがあれば接続
+            {
+                M5.Display.printf("\nFound: %s\n", advertisedDevice->getName().c_str());
 #else
             // すべてのHRセンサーに接続
             {
@@ -285,7 +297,7 @@ void setup() {
 #ifdef USE_POLAR_H10
     M5.Display.println("Scanning Polar H10...");
 #elif defined(USE_COOSPO)
-    M5.Display.println("Scanning CooSpo...");
+    M5.Display.println("Scanning HR(CooSpo/HW706)...");
 #else
     M5.Display.println("Scanning HR Sensor...");
 #endif
@@ -310,13 +322,9 @@ void loop() {
         pumpEndTime = millis() + 3000; // 3 seconds
         isPumping = true;
         
-        M5.Display.fillScreen(RED);
-        M5.Display.setCursor(10, 40);
-        M5.Display.setTextSize(3);
-        M5.Display.setTextColor(WHITE);
-        M5.Display.println("MANUAL");
-        M5.Display.println("DEFLATE");
-        M5.Display.println("3s");
+        g_pumpStatus = "DEFLATE";
+        g_isManual = true;
+        drawDisplay();
     }
     
     // Only trigger inflate on release if it was NOT a long press
@@ -325,14 +333,9 @@ void loop() {
         pumpInflate();
         pumpEndTime = millis() + 3000; // 3 seconds
         isPumping = true;
-        
-        M5.Display.fillScreen(BLUE);
-        M5.Display.setCursor(10, 40);
-        M5.Display.setTextSize(3);
-        M5.Display.setTextColor(WHITE);
-        M5.Display.println("MANUAL");
-        M5.Display.println("INFLATE");
-        M5.Display.println("3s");
+        g_pumpStatus = "INFLATE";
+        g_isManual = true;
+        drawDisplay();
     }
     
     // Reset flag after release
@@ -342,8 +345,9 @@ void loop() {
 
     if (isPumping && millis() > pumpEndTime) {
         pumpStop();
-        // Clear screen or update status after manual stop? 
-        // Or just let next notify update it.
+        g_pumpStatus = "IDLE";
+        g_isManual = false;
+        drawDisplay();
     }
 
     if (doConnect) {
