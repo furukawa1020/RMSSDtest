@@ -1,4 +1,4 @@
-#include <M5Unified.h>
+﻿#include <M5Unified.h>
 #include <NimBLEDevice.h>
 #include <driver/gpio.h>
 
@@ -214,7 +214,6 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     }
                     prevRelaxationValue = currentRelaxationValue;
                 }
-            }
     }
 }
 
