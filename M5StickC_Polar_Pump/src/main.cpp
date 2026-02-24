@@ -14,8 +14,8 @@ const int PIN_PUMP_2 = 2;
 // �p�����[�^�ݒ�
 const unsigned long BLOW_UP_TIME_MS = 60000;
 const int RMSSD_WINDOW_SIZE = 30;
-const float PUMP_MULTIPLIER = 200.0;        // inflate multiplier
-const float DEFLATE_MULTIPLIER = 800.0;    // deflate multiplier (much stronger)
+const float PUMP_MULTIPLIER = 3000.0;       // inflate multiplier (delta-based)
+const float DEFLATE_MULTIPLIER = 6000.0;    // deflate multiplier (delta-based, stronger)
 const unsigned long MIN_PUMP_TIME_MS = 100;   
 const unsigned long MAX_PUMP_TIME_MS = 12000; // max 12s
 
@@ -199,11 +199,12 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     }
 
                     float currentRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
-                    // Deviation from baseline: positive=relaxed(deflate), negative=stressed(inflate)
-                    float deviation = currentRelaxationValue - 100.0;
-                    bool actionInflate = (deviation < 0);
+                    // Delta from previous reading (time-series % change)
+                    // positive delta = relaxing → deflate, negative delta = stressing → inflate
+                    float delta = currentRelaxationValue - prevRelaxationValue;
+                    bool actionInflate = (delta < 0);
                     float mult = actionInflate ? PUMP_MULTIPLIER : DEFLATE_MULTIPLIER;
-                    float durationSeconds = (abs(deviation) / 100.0) * mult;
+                    float durationSeconds = (abs(delta) / 100.0) * mult;
                     
                     // Always update display globals with fresh sensor data
                     g_hr = hrValue;
