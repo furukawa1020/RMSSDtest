@@ -124,29 +124,40 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         offset = 2;
     }
 
-    // Always update HR display (even without RR data)
+    // Always update HR display
     g_hr = hrValue;
 
-    // Force-try to parse remaining bytes as RR intervals regardless of flags
-    // (Some cheap sensors send RR without setting the flag bit correctly)
+    // --- RR from sensor packet (Polar H10 etc.) ---
     bool gotRR = false;
-    for (int i = offset; i + 1 < (int)length; i += 2) {
-        uint16_t rawRR = pData[i] | (pData[i+1] << 8);
-        float rrMs = (rawRR / 1024.0) * 1000.0;
-        // Accept only physiologically plausible RR (200ms=300bpm ~ 2500ms=24bpm)
-        if (rrMs < 200 || rrMs > 2500) continue;
-        gotRR = true;
-        rrIntervals.push_back(rrMs);
-        if (rrIntervals.size() > RMSSD_WINDOW_SIZE) {
-            rrIntervals.erase(rrIntervals.begin());
+    if (flags & 0x10) {
+        for (int i = offset; i + 1 < (int)length; i += 2) {
+            uint16_t rawRR = pData[i] | (pData[i+1] << 8);
+            float rrMs = (rawRR / 1024.0) * 1000.0;
+            if (rrMs < 200 || rrMs > 2500) continue;
+            gotRR = true;
+            rrIntervals.push_back(rrMs);
+            if (rrIntervals.size() > RMSSD_WINDOW_SIZE)
+                rrIntervals.erase(rrIntervals.begin());
         }
     }
 
-    if (!gotRR) {
-        char buf[40];
-        snprintf(buf, sizeof(buf), "NO RR f=0x%02X l=%d", flags, (int)length);
-        g_phase = String(buf);
-        g_rmssd = 0;
+    // --- Fallback: estimate RR from notification timing ---
+    // (works for sensors that notify once per heartbeat, e.g. HW706)
+    static unsigned long lastNotifyMs = 0;
+    unsigned long nowMs = millis();
+    if (!gotRR && lastNotifyMs > 0) {
+        float rrMs = (float)(nowMs - lastNotifyMs);
+        if (rrMs >= 300 && rrMs <= 2000) {
+            gotRR = true;
+            rrIntervals.push_back(rrMs);
+            if (rrIntervals.size() > RMSSD_WINDOW_SIZE)
+                rrIntervals.erase(rrIntervals.begin());
+        }
+    }
+    lastNotifyMs = nowMs;
+
+    if (!gotRR || rrIntervals.size() < 2) {
+        g_phase = "COLLECTING...";
         drawDisplay();
         return;
     }
