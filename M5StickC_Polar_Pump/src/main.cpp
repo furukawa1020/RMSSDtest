@@ -12,11 +12,12 @@ const int PIN_PUMP_1 = 1;
 const int PIN_PUMP_2 = 2;
 
 // �p�����[�^�ݒ�
-const unsigned long BLOW_UP_TIME_MS = 180000;
+const unsigned long BLOW_UP_TIME_MS = 60000;
 const int RMSSD_WINDOW_SIZE = 30;
-const float PUMP_MULTIPLIER = 100.0;           // 
+const float PUMP_MULTIPLIER = 200.0;        // inflate multiplier
+const float DEFLATE_MULTIPLIER = 800.0;    // deflate multiplier (much stronger)
 const unsigned long MIN_PUMP_TIME_MS = 100;   
-const unsigned long MAX_PUMP_TIME_MS = 8000;  // ＾
+const unsigned long MAX_PUMP_TIME_MS = 12000; // max 12s
 
 // Polar UUIDs
 static BLEUUID serviceUUID("180d");
@@ -198,15 +199,11 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
                     }
 
                     float currentRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
-                    float error = (currentRelaxationValue - prevRelaxationValue) / prevRelaxationValue;
-                    
-                    //  �������d�v 
-                    // �����b�N�X (error > 0) -> INFLATE (����)
-                    // �X�g���X (error < 0)   -> DEFLATE (�r�C)
-                    bool actionInflate = (error < 0); 
-                    
-                    // �{���������Ď��Ԃ��Z�o
-                    float durationSeconds = abs(error) * PUMP_MULTIPLIER;
+                    // Deviation from baseline: positive=relaxed(deflate), negative=stressed(inflate)
+                    float deviation = currentRelaxationValue - 100.0;
+                    bool actionInflate = (deviation < 0);
+                    float mult = actionInflate ? PUMP_MULTIPLIER : DEFLATE_MULTIPLIER;
+                    float durationSeconds = (abs(deviation) / 100.0) * mult;
                     
                     // Always update display globals with fresh sensor data
                     g_hr = hrValue;
