@@ -4,8 +4,8 @@
 
 // ----- センサー選択 -----
 // どちらか1つをコメントアウトしてください
-#define USE_POLAR_H10     // Polar H10を使用
-// #define USE_COOSPO     // CooSpoを使用
+// #define USE_POLAR_H10     // Polar H10を使用
+#define USE_COOSPO     // CooSpoを使用
 
 // ----- 設定 (ATOMS3 Grove G1/G2) -----
 const int PIN_PUMP_1 = 1;
@@ -302,6 +302,8 @@ void loop() {
     
     // Manual Button Control (ATOMS3: touch screen button)
     // Long press (>5s): Deflate, Short press: Inflate
+    
+    // Check long press FIRST before wasReleased
     if (M5.BtnA.pressedFor(5000) && !buttonWasLongPress) {
         buttonWasLongPress = true;
         pumpDeflate();
@@ -317,21 +319,24 @@ void loop() {
         M5.Display.println("3s");
     }
     
+    // Only trigger inflate on release if it was NOT a long press
+    if (M5.BtnA.wasReleased() && !buttonWasLongPress) {
+        // Short press - inflate
+        pumpInflate();
+        pumpEndTime = millis() + 3000; // 3 seconds
+        isPumping = true;
+        
+        M5.Display.fillScreen(BLUE);
+        M5.Display.setCursor(10, 40);
+        M5.Display.setTextSize(3);
+        M5.Display.setTextColor(WHITE);
+        M5.Display.println("MANUAL");
+        M5.Display.println("INFLATE");
+        M5.Display.println("3s");
+    }
+    
+    // Reset flag after release
     if (M5.BtnA.wasReleased()) {
-        if (!buttonWasLongPress) {
-            // Short press - inflate
-            pumpInflate();
-            pumpEndTime = millis() + 3000; // 3 seconds
-            isPumping = true;
-            
-            M5.Display.fillScreen(BLUE);
-            M5.Display.setCursor(10, 40);
-            M5.Display.setTextSize(3);
-            M5.Display.setTextColor(WHITE);
-            M5.Display.println("MANUAL");
-            M5.Display.println("INFLATE");
-            M5.Display.println("3s");
-        }
         buttonWasLongPress = false;
     }
 
