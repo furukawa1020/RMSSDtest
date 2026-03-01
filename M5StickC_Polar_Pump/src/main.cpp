@@ -322,35 +322,30 @@ void setup() {
 void loop() {
     M5.update();
     
-    // Manual Button Control (ATOMS3: touch screen button)
-    // Long press (>5s): Deflate, Short press: Inflate
+    // Manual Button Control (ATOMS3: touch screen)
+    // Press & hold = DEFLATE (as long as held)
+    // Released = stop pump
     
-    // Check long press FIRST before wasReleased
-    if (M5.BtnA.pressedFor(5000) && !buttonWasLongPress) {
-        buttonWasLongPress = true;
-        pumpDeflate();
-        pumpEndTime = millis() + 3000; // 3 seconds
-        isPumping = true;
-        
-        g_pumpStatus = "DEFLATE";
-        g_isManual = true;
-        drawDisplay();
+    if (M5.BtnA.isPressed()) {
+        if (!isPumping || g_pumpStatus != "DEFLATE") {
+            pumpDeflate();
+            pumpEndTime = millis() + 30000; // up to 30s safety cap
+            isPumping = true;
+            g_pumpStatus = "DEFLATE";
+            g_isManual = true;
+            drawDisplay();
+        } else {
+            // extend while held
+            pumpEndTime = millis() + 30000;
+        }
     }
-    
-    // Only trigger inflate on release if it was NOT a long press
-    if (M5.BtnA.wasReleased() && !buttonWasLongPress) {
-        // Short press - inflate
-        pumpInflate();
-        pumpEndTime = millis() + 3000; // 3 seconds
-        isPumping = true;
-        g_pumpStatus = "INFLATE";
-        g_isManual = true;
-        drawDisplay();
-    }
-    
-    // Reset flag after release
+
     if (M5.BtnA.wasReleased()) {
+        pumpStop();
+        g_pumpStatus = "IDLE";
+        g_isManual = false;
         buttonWasLongPress = false;
+        drawDisplay();
     }
 
     if (isPumping && millis() > pumpEndTime) {
