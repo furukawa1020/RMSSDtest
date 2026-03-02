@@ -27,7 +27,7 @@ std::vector<float> rrIntervals;
 std::vector<float> baselineSamples;
 float         baselineRmssd         = 0.0f;
 float         prevRelaxationValue   = 0.0f;
-unsigned long startTime             = 0;
+unsigned long startTime             = 0xFFFFFFFF; // onConnectで上書き
 bool          isBaselineEstablished = false;
 bool          isPumping             = false;
 unsigned long pumpEndTime           = 0;
@@ -85,8 +85,8 @@ void triggerPump(bool inflate, float seconds,
     g_hr         = hr;
     g_rmssd      = rmssd;
     g_relax      = relax;
-    // RELAX -> 収縮(DN),  STRESS -> 膨張(UP)
-    g_pumpStatus = inflate ? "RELAX(DN)" : "STRESS(UP)";
+    // STRESS -> 膨張(DN),  RELAX -> 収縮(UP)
+    g_pumpStatus = inflate ? "STRESS(DN)" : "RELAX(UP)";
     drawDisplay();
 
     if (inflate) pumpInflate();
@@ -171,13 +171,14 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar,
     // ── ベースライン期間: 膨張し続ける ──
     if (elapsed < BLOW_UP_TIME_MS) {
         baselineSamples.push_back(currentRmssd);
+        unsigned long remaining = (BLOW_UP_TIME_MS - elapsed) / 1000;
         g_phase      = "BASELINE";
-        g_pumpStatus = "INFLATING";
+        g_pumpStatus = "BL:" + String(remaining) + "s";
         g_relax      = 0.0f;
         drawDisplay();
         pumpInflate();
-        pumpEndTime = millis() + 500;
-        isPumping   = true;
+        // isPumping は false のまま → loop()のタイマーに邪魔されない
+        // pumpInflate()はdigitalWrite(HIGH)なので通知毎に呼べば継続する
         return;
     }
 
@@ -205,10 +206,9 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar,
     g_relax = currentRelaxationValue;
     g_phase = "FEEDBACK";
 
-    // 【逆ロジック – 95db83e から反転】
-    //   リラックス (error > 0, RMSSD 上昇) -> actionInflate=true  -> pumpInflate -> 収縮(DN)
-    //   ストレス   (error < 0, RMSSD 低下) -> actionInflate=false -> pumpDeflate -> 膨張(UP)
-    bool  actionInflate   = (error > 0);
+    // RELAX (error > 0, RMSSD 上昇) -> actionInflate=false -> pumpDeflate -> 収縮(UP)
+    // STRESS (error < 0, RMSSD 低下) -> actionInflate=true  -> pumpInflate -> 膨張(DN)
+    bool  actionInflate   = (error < 0);
     float durationSeconds = fabsf(error) * PUMP_MULTIPLIER;
 
     if (!isPumping && durationSeconds > 0.05f) {
