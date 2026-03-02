@@ -2,74 +2,64 @@
 #include <NimBLEDevice.h>
 #include <driver/gpio.h>
 
-// ----- センサー選択 -----
-// どちらか1つをコメントアウトしてください
-// #define USE_POLAR_H10     // Polar H10を使用
-#define USE_COOSPO     // CooSpoを使用
+// ----- M5Stack Core Port C (GPIO16/17) -----
+const int PIN_PUMP_1 = 16;
+const int PIN_PUMP_2 = 17;
 
-// ----- 設定 (ATOMS3 Grove G1/G2) -----
-const int PIN_PUMP_1 = 1;
-const int PIN_PUMP_2 = 2;
+// パラメータ設定
+const unsigned long BLOW_UP_TIME_MS  = 60000;   // 60秒ベースライン
+const int            RMSSD_WINDOW_SIZE = 30;
+const float          PUMP_MULTIPLIER   = 100.0f; // error(%) -> 秒数変換
+const unsigned long  MIN_PUMP_TIME_MS  = 100;
+const unsigned long  MAX_PUMP_TIME_MS  = 8000;   // 最大8秒
 
-// �p�����[�^�ݒ�
-const unsigned long BLOW_UP_TIME_MS = 60000;
-const int RMSSD_WINDOW_SIZE = 30;
-const float PUMP_MULTIPLIER = 6000.0;       // inflate multiplier (delta-based)
-const float DEFLATE_MULTIPLIER = 6000.0;    // deflate multiplier (delta-based)
-const unsigned long MIN_PUMP_TIME_MS = 100;   
-const unsigned long MAX_PUMP_TIME_MS = 12000; // max 12s
-
-// Polar UUIDs
+// BLE UUIDs (Heart Rate Service – CooSpo / Polar H10 共通)
 static BLEUUID serviceUUID("180d");
 static BLEUUID charUUID("2a37");
 
-// �O���[�o���ϐ�
-bool doConnect = false;
-bool connected = false;
-bool doScan = false;
-NimBLEAdvertisedDevice* myDevice;
-NimBLEClient* pClient = nullptr;
+// グローバル変数
+bool                    doConnect = false;
+bool                    connected = false;
+NimBLEAdvertisedDevice* myDevice  = nullptr;
+NimBLEClient*           pClient   = nullptr;
 
 std::vector<float> rrIntervals;
 std::vector<float> baselineSamples;
-float baselineRmssd = 0.0;
-float prevRelaxationValue = 0.0;
-unsigned long startTime = 0;
-bool isBaselineEstablished = false;
-bool isPumping = false;
-unsigned long pumpEndTime = 0;
-bool buttonWasLongPress = false;
+float         baselineRmssd         = 0.0f;
+float         prevRelaxationValue   = 0.0f;
+unsigned long startTime             = 0;
+bool          isBaselineEstablished = false;
+bool          isPumping             = false;
+unsigned long pumpEndTime           = 0;
 
-// --- Display state globals ---
-int g_hr = 0;
-float g_rmssd = 0.0;
-float g_relax = 0.0;
+// ディスプレイ状態
+int    g_hr         = 0;
+float  g_rmssd      = 0.0f;
+float  g_relax      = 0.0f;
 String g_pumpStatus = "IDLE";
-bool g_isManual = false;
-String g_phase = "SCANNING";
+String g_phase      = "SCANNING";
 
 void drawDisplay() {
     M5.Display.fillScreen(BLACK);
     M5.Display.setCursor(0, 0);
-    M5.Display.setTextSize(2);
     M5.Display.setTextColor(WHITE);
-    M5.Display.printf("HR:%d bpm\n", g_hr);
-    M5.Display.printf("RR:%.1f ms\n", g_rmssd);
-    M5.Display.printf("Bs:%.1f\n", baselineRmssd);
-    M5.Display.printf("Rx:%.0f%%\n", g_relax);
-    if (g_pumpStatus == "INFLATE") M5.Display.setTextColor(CYAN);
-    else if (g_pumpStatus == "DEFLATE") M5.Display.setTextColor(RED);
-    else M5.Display.setTextColor(GREEN);
-    if (g_isManual) M5.Display.print("[M]");
-    M5.Display.println(g_pumpStatus);
-    M5.Display.setTextColor(YELLOW);
-    M5.Display.println(g_phase);
+    M5.Display.setTextSize(2);
+    M5.Display.printf("[%s]\n",        g_phase.c_str());
+    M5.Display.printf("HR:   %d bpm\n", g_hr);
+    M5.Display.printf("RMSSD:%.1f\n",   g_rmssd);
+    M5.Display.printf("BASE: %.1f\n",   baselineRmssd);
+    M5.Display.printf("RLX:  %.0f%%\n", g_relax);
+    M5.Display.setTextSize(3);
+    M5.Display.printf("%s\n", g_pumpStatus.c_str());
 }
 
+// ---------- ポンプ制御 ----------
 void pumpStop() {
     digitalWrite(PIN_PUMP_1, LOW);
     digitalWrite(PIN_PUMP_2, LOW);
-    isPumping = false;
+    isPumping    = false;
+    g_pumpStatus = "IDLE";
+    drawDisplay();
 }
 
 void pumpInflate() {
@@ -82,204 +72,204 @@ void pumpDeflate() {
     digitalWrite(PIN_PUMP_2, HIGH);
 }
 
-void triggerPump(bool inflate, float seconds) {
-    if (seconds <= 0) return;
-    
+// inflate=true  -> pumpInflate()  -> 物理的に「収縮」 (リラックス時)
+// inflate=false -> pumpDeflate()  -> 物理的に「膨張」 (ストレス時)
+void triggerPump(bool inflate, float seconds,
+                 int hr, float rmssd, float relax) {
+    if (seconds <= 0.0f) return;
+
     unsigned long duration = (unsigned long)(seconds * 1000);
     if (duration < MIN_PUMP_TIME_MS) duration = MIN_PUMP_TIME_MS;
     if (duration > MAX_PUMP_TIME_MS) duration = MAX_PUMP_TIME_MS;
-    
-    g_pumpStatus = inflate ? "INFLATE" : "DEFLATE";
-    g_isManual = false;
+
+    g_hr         = hr;
+    g_rmssd      = rmssd;
+    g_relax      = relax;
+    // RELAX -> 収縮(DN),  STRESS -> 膨張(UP)
+    g_pumpStatus = inflate ? "RELAX(DN)" : "STRESS(UP)";
     drawDisplay();
 
     if (inflate) pumpInflate();
-    else pumpDeflate();
-    
+    else         pumpDeflate();
+
     pumpEndTime = millis() + duration;
-    isPumping = true;
+    isPumping   = true;
 }
 
+// ---------- RMSSD 計算 ----------
 float calculateRmssd() {
-    if (rrIntervals.size() < 2) return 0.0;
-    float sumSquaredDiff = 0.0;
+    if (rrIntervals.size() < 2) return 0.0f;
+    float sum = 0.0f;
     for (size_t i = 1; i < rrIntervals.size(); i++) {
-        float diff = rrIntervals[i] - rrIntervals[i-1];
-        sumSquaredDiff += diff * diff;
+        float d = rrIntervals[i] - rrIntervals[i - 1];
+        sum += d * d;
     }
-    return sqrt(sumSquaredDiff / (rrIntervals.size() - 1));
+    return sqrtf(sum / (rrIntervals.size() - 1));
 }
 
-void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+// ---------- BLE 通知コールバック ----------
+void notifyCallback(NimBLERemoteCharacteristic* pChar,
+                    uint8_t* pData, size_t length, bool isNotify) {
     if (length < 2) return;
 
-    uint8_t flags = pData[0];
-    int hrValue = 0;
-    int offset = 1;
+    uint8_t flags   = pData[0];
+    int     hrValue = 0;
+    int     offset  = 1;
 
     if (flags & 0x01) {
         hrValue = pData[1] | (pData[2] << 8);
-        offset = 3;
+        offset  = 3;
     } else {
         hrValue = pData[1];
-        offset = 2;
+        offset  = 2;
     }
-
-    // Always update HR display
     g_hr = hrValue;
 
-    // --- RR from sensor packet (Polar H10 etc.) ---
+    // ── RR 取得: パケット内 (Polar H10) ──
     bool gotRR = false;
     if (flags & 0x10) {
         for (int i = offset; i + 1 < (int)length; i += 2) {
-            uint16_t rawRR = pData[i] | (pData[i+1] << 8);
-            float rrMs = (rawRR / 1024.0) * 1000.0;
-            if (rrMs < 200 || rrMs > 2500) continue;
-            gotRR = true;
-            rrIntervals.push_back(rrMs);
-            if (rrIntervals.size() > RMSSD_WINDOW_SIZE)
-                rrIntervals.erase(rrIntervals.begin());
+            uint16_t raw  = pData[i] | (pData[i + 1] << 8);
+            float    rrMs = (raw / 1024.0f) * 1000.0f;
+            if (rrMs >= 300 && rrMs <= 2000) {
+                rrIntervals.push_back(rrMs);
+                if (rrIntervals.size() > RMSSD_WINDOW_SIZE)
+                    rrIntervals.erase(rrIntervals.begin());
+                gotRR = true;
+            }
         }
     }
 
-    // --- Fallback: estimate RR from notification timing ---
-    // (works for sensors that notify once per heartbeat, e.g. HW706)
-    static unsigned long lastNotifyMs = 0;
-    unsigned long nowMs = millis();
-    if (!gotRR && lastNotifyMs > 0) {
-        float rrMs = (float)(nowMs - lastNotifyMs);
-        if (rrMs >= 300 && rrMs <= 2000) {
-            gotRR = true;
-            rrIntervals.push_back(rrMs);
-            if (rrIntervals.size() > RMSSD_WINDOW_SIZE)
-                rrIntervals.erase(rrIntervals.begin());
+    // ── RR 取得: 通知間隔から推定 (CooSpo/HW706 フォールバック) ──
+    if (!gotRR) {
+        static unsigned long lastNotifyTime = 0;
+        unsigned long now = millis();
+        if (lastNotifyTime > 0) {
+            unsigned long interval = now - lastNotifyTime;
+            if (interval >= 300 && interval <= 2000) {
+                rrIntervals.push_back((float)interval);
+                if (rrIntervals.size() > RMSSD_WINDOW_SIZE)
+                    rrIntervals.erase(rrIntervals.begin());
+                gotRR = true;
+            }
         }
+        lastNotifyTime = now;
     }
-    lastNotifyMs = nowMs;
 
-    if (!gotRR || rrIntervals.size() < 2) {
-        g_phase = "COLLECTING...";
+    // RR データ不足
+    if (rrIntervals.size() < 2) {
+        g_phase      = "COLLECTING";
+        g_pumpStatus = "WAIT RR";
         drawDisplay();
         return;
     }
 
-    if (rrIntervals.size() >= 2) {
-                float currentRmssd = calculateRmssd();
-                unsigned long elapsed = millis() - startTime;
-                
-                if (elapsed < BLOW_UP_TIME_MS) {
-                    // Continuous inflation during baseline
-                    pumpInflate();
-                    baselineSamples.push_back(currentRmssd);
-                    g_hr = hrValue;
-                    g_rmssd = currentRmssd;
-                    g_pumpStatus = "INFLATE";
-                    g_isManual = false;
-                    g_phase = "BL:" + String((BLOW_UP_TIME_MS - elapsed) / 1000) + "s";
-                    drawDisplay();
-                } 
-                else {
-                    if (!isBaselineEstablished) {
-                        pumpStop(); // Stop the initial 3-min inflation
+    float         currentRmssd = calculateRmssd();
+    g_rmssd                    = currentRmssd;
+    unsigned long elapsed      = millis() - startTime;
 
-                        float sum = 0;
-                        for(float v : baselineSamples) sum += v;
-                        if (!baselineSamples.empty()) baselineRmssd = sum / baselineSamples.size();
-                        if (baselineRmssd == 0) baselineRmssd = 1.0; 
-                        isBaselineEstablished = true;
-                        
-                        prevRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
-
-                        g_phase = "FEEDBACK";
-                        g_pumpStatus = "IDLE";
-                        g_isManual = false;
-                        drawDisplay();
-                        delay(300);
-                        return;
-                    }
-
-                    float currentRelaxationValue = (currentRmssd / baselineRmssd) * 100.0;
-                    // Delta from previous reading
-                    float delta = currentRelaxationValue - prevRelaxationValue;
-                    bool actionInflate = (delta < 0);
-                    float mult = actionInflate ? PUMP_MULTIPLIER : DEFLATE_MULTIPLIER;
-                    float durationSeconds = (abs(delta) / 100.0) * mult;
-
-                    // Always update display globals with fresh sensor data
-                    g_hr = hrValue;
-                    g_rmssd = currentRmssd;
-                    g_relax = currentRelaxationValue;
-                    g_phase = "FEEDBACK";
-
-                    if (!isPumping) {
-                        if (durationSeconds > 0.05) {
-                            triggerPump(actionInflate, durationSeconds);
-                        } else {
-                            // delta too small: keep pumping in last known direction for MIN time
-                            static bool lastActionInflate = true;
-                            if (delta != 0) lastActionInflate = actionInflate;
-                            triggerPump(lastActionInflate, 1.0);
-                        }
-                    } else {
-                        drawDisplay();
-                    }
-                    prevRelaxationValue = currentRelaxationValue;
-                }
-    }
-}
-
-class MyClientCallback : public NimBLEClientCallbacks {
-    void onConnect(NimBLEClient* pclient) {
-        connected = true;
-        g_phase = "CONNECTED";
-        g_pumpStatus = "INFLATE";
-        g_isManual = false;
+    // ── ベースライン期間: 膨張し続ける ──
+    if (elapsed < BLOW_UP_TIME_MS) {
+        baselineSamples.push_back(currentRmssd);
+        g_phase      = "BASELINE";
+        g_pumpStatus = "INFLATING";
+        g_relax      = 0.0f;
         drawDisplay();
-        delay(300);
-        startTime = millis(); 
-    };
-    void onDisconnect(NimBLEClient* pclient) {
-        connected = false;
-        g_phase = "DISCONNECTED";
+        pumpInflate();
+        pumpEndTime = millis() + 500;
+        isPumping   = true;
+        return;
+    }
+
+    // ── ベースライン確定 ──
+    if (!isBaselineEstablished) {
+        pumpStop();
+        float sum = 0.0f;
+        for (float v : baselineSamples) sum += v;
+        if (!baselineSamples.empty()) baselineRmssd = sum / baselineSamples.size();
+        if (baselineRmssd == 0.0f) baselineRmssd = 1.0f;
+        isBaselineEstablished = true;
+        prevRelaxationValue   = (currentRmssd / baselineRmssd) * 100.0f;
+
+        g_phase      = "FEEDBACK";
+        g_pumpStatus = "READY";
+        g_relax      = prevRelaxationValue;
+        drawDisplay();
+        delay(2000);
+        return;
+    }
+
+    // ── フィードバック制御 ──
+    float currentRelaxationValue = (currentRmssd / baselineRmssd) * 100.0f;
+    float error = (currentRelaxationValue - prevRelaxationValue) / prevRelaxationValue;
+    g_relax = currentRelaxationValue;
+    g_phase = "FEEDBACK";
+
+    // 【逆ロジック – 95db83e から反転】
+    //   リラックス (error > 0, RMSSD 上昇) -> actionInflate=true  -> pumpInflate -> 収縮(DN)
+    //   ストレス   (error < 0, RMSSD 低下) -> actionInflate=false -> pumpDeflate -> 膨張(UP)
+    bool  actionInflate   = (error > 0);
+    float durationSeconds = fabsf(error) * PUMP_MULTIPLIER;
+
+    if (!isPumping && durationSeconds > 0.05f) {
+        triggerPump(actionInflate, durationSeconds,
+                    hrValue, currentRmssd, currentRelaxationValue);
+    }
+
+    if (!isPumping) {
         g_pumpStatus = "IDLE";
         drawDisplay();
     }
-};
 
-class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
-    void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
-        M5.Display.print("."); 
-        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(serviceUUID)) {
-#ifdef USE_POLAR_H10
-            // Polar H10を探す
-            if (advertisedDevice->getName().find("Polar") != std::string::npos) {
-                M5.Display.println("\nFound Polar H10!");
-#elif defined(USE_COOSPO)
-            // CooSpo/HW706: デバイス名に関係なくHRサービスがあれば接続
-            {
-                M5.Display.printf("\nFound: %s\n", advertisedDevice->getName().c_str());
-#else
-            // すべてのHRセンサーに接続
-            {
-                M5.Display.println("\nFound HR Sensor!");
-#endif
-                M5.Display.printf("Device: %s\n", advertisedDevice->getName().c_str());
-                NimBLEDevice::getScan()->stop();
-                myDevice = advertisedDevice;
-                doConnect = true;
-                doScan = true;
-            }
-        }
+    prevRelaxationValue = currentRelaxationValue;
+}
+
+// ---------- BLE クライアントコールバック ----------
+class MyClientCallback : public NimBLEClientCallbacks {
+    void onConnect(NimBLEClient* pclient) override {
+        connected    = true;
+        startTime    = millis();
+        g_phase      = "BASELINE";
+        g_pumpStatus = "CONNECTED";
+        drawDisplay();
+        delay(500);
+    }
+    void onDisconnect(NimBLEClient* pclient) override {
+        connected    = false;
+        g_phase      = "SCANNING";
+        g_pumpStatus = "DISCONNECTED";
+        drawDisplay();
     }
 };
 
+// ---------- BLE スキャンコールバック (CooSpo/Polar 両対応: HR UUID で検索) ----------
+class MyAdvertisedDeviceCallbacks : public NimBLEAdvertisedDeviceCallbacks {
+    void onResult(NimBLEAdvertisedDevice* advertisedDevice) override {
+        if (!advertisedDevice->haveServiceUUID() ||
+            !advertisedDevice->isAdvertisingService(serviceUUID)) return;
+
+        String name = advertisedDevice->haveName()
+                          ? advertisedDevice->getName().c_str()
+                          : "Unknown";
+
+        // CooSpo (HW706) は名前が "CooSpo" または "HW706" を含む
+        // Polar H10 は "Polar" を含む
+        // どちらも HR UUID で見つかったら接続する (名前表示のみ)
+        g_phase      = "FOUND";
+        g_pumpStatus = name;   // 画面に実デバイス名を表示
+        drawDisplay();
+
+        NimBLEDevice::getScan()->stop();
+        myDevice  = advertisedDevice;
+        doConnect = true;
+    }
+};
+
+// ---------- setup ----------
 void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
-    
-    gpio_reset_pin((gpio_num_t)PIN_PUMP_1);
-    gpio_reset_pin((gpio_num_t)PIN_PUMP_2);
-    
+
     M5.Display.setRotation(1);
     M5.Display.setTextSize(2);
     M5.Display.setBrightness(200);
@@ -289,29 +279,28 @@ void setup() {
     digitalWrite(PIN_PUMP_1, LOW);
     digitalWrite(PIN_PUMP_2, LOW);
 
-    M5.Display.println("FIRMWARE RESTORED");
-    M5.Display.println("Logic: Relax->Inflate");
-    delay(1000);
-
-    M5.Display.fillScreen(RED);
-    M5.Display.setCursor(0,0);
-    M5.Display.println("PRE-FILLING...");
-    M5.Display.println("Inflating 6s...");
-    
-    pumpInflate();
-    delay(6000); 
-    pumpStop();
-    
+    // 起動メッセージ
     M5.Display.fillScreen(BLACK);
     M5.Display.setCursor(0, 0);
-#ifdef USE_POLAR_H10
-    M5.Display.println("Scanning Polar H10...");
-#elif defined(USE_COOSPO)
-    M5.Display.println("Scanning HR(CooSpo/HW706)...");
-#else
-    M5.Display.println("Scanning HR Sensor...");
-#endif
-    
+    M5.Display.setTextColor(WHITE);
+    M5.Display.println("M5Stack Core");
+    M5.Display.println("RMSSD Biofeedback");
+    M5.Display.println("STRESS -> UP(inflate)");
+    M5.Display.println("RELAX  -> DN(deflate)");
+    delay(2000);
+
+    // 初期充填 6 秒
+    M5.Display.fillScreen(BLACK);
+    M5.Display.setCursor(0, 0);
+    M5.Display.println("PRE-FILLING 6s...");
+    pumpInflate();
+    delay(6000);
+    pumpStop();
+
+    g_phase      = "SCANNING";
+    g_pumpStatus = "SEARCHING";
+    drawDisplay();
+
     NimBLEDevice::init("");
     NimBLEScan* pScan = NimBLEDevice::getScan();
     pScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
@@ -319,63 +308,57 @@ void setup() {
     pScan->start(10, false);
 }
 
+// ---------- loop ----------
 void loop() {
     M5.update();
-    
-    // Manual Button Control (ATOMS3: touch screen)
-    // Press & hold = DEFLATE (as long as held)
-    // Released = stop pump
-    
+
+    // ── 手動ボタン操作 (M5Stack Core: 3ボタン) ──
+    // BtnA (左ボタン): 押している間 inflate -> 物理的に収縮方向
     if (M5.BtnA.isPressed()) {
-        if (!isPumping || g_pumpStatus != "DEFLATE") {
-            pumpDeflate();
-            pumpEndTime = millis() + 30000; // up to 30s safety cap
-            isPumping = true;
-            g_pumpStatus = "DEFLATE";
-            g_isManual = true;
-            drawDisplay();
-        } else {
-            // extend while held
-            pumpEndTime = millis() + 30000;
-        }
-    }
-
-    if (M5.BtnA.wasReleased()) {
-        pumpStop();
-        g_pumpStatus = "IDLE";
-        g_isManual = false;
-        buttonWasLongPress = false;
+        pumpInflate();
+        g_pumpStatus = "MANUAL DN";
         drawDisplay();
+        pumpEndTime = millis() + 200;
+        isPumping   = true;
+    }
+    // BtnC (右ボタン): 押している間 deflate -> 物理的に膨張方向
+    else if (M5.BtnC.isPressed()) {
+        pumpDeflate();
+        g_pumpStatus = "MANUAL UP";
+        drawDisplay();
+        pumpEndTime = millis() + 200;
+        isPumping   = true;
     }
 
+    // タイマー切れでポンプ停止
     if (isPumping && millis() > pumpEndTime) {
         pumpStop();
-        g_pumpStatus = "IDLE";
-        g_isManual = false;
-        drawDisplay();
     }
 
+    // ── BLE 接続処理 ──
     if (doConnect) {
         if (pClient != nullptr) NimBLEDevice::deleteClient(pClient);
         pClient = NimBLEDevice::createClient();
         pClient->setClientCallbacks(new MyClientCallback());
-        
+
         if (pClient->connect(myDevice)) {
-            NimBLERemoteService* pRemoteService = pClient->getService(serviceUUID);
-            if (pRemoteService) {
-                NimBLERemoteCharacteristic* pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
-                if (pRemoteCharacteristic && pRemoteCharacteristic->canNotify()) {
-                    pRemoteCharacteristic->subscribe(true, notifyCallback);
+            NimBLERemoteService* pSvc = pClient->getService(serviceUUID);
+            if (pSvc) {
+                NimBLERemoteCharacteristic* pChar = pSvc->getCharacteristic(charUUID);
+                if (pChar && pChar->canNotify()) {
+                    pChar->subscribe(true, notifyCallback);
                 }
             }
         } else {
-            M5.Display.println("Connect Failed");
+            g_pumpStatus = "CONN FAIL";
+            drawDisplay();
             NimBLEDevice::getScan()->start(5, false);
         }
         doConnect = false;
     }
-    
+
+    // スキャン再開
     if (!connected && !doConnect && !NimBLEDevice::getScan()->isScanning()) {
-         NimBLEDevice::getScan()->start(5, false);
+        NimBLEDevice::getScan()->start(5, false);
     }
 }
